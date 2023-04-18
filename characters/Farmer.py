@@ -16,7 +16,15 @@ class Farmer(Character):
         
         front = ChessCoordinate(self.coordinate.x, self.coordinate.y + factor)
         sides = [ChessCoordinate(self.coordinate.x + 1, self.coordinate.y + factor), ChessCoordinate(self.coordinate.x - 1, self.coordinate.y + factor)]
-        all_movable = [front]
+        
+        front_front = None
+        if not self.has_been_moved:
+            front_front = ChessCoordinate(self.coordinate.x, self.coordinate.y + factor * 2)
+
+        all_movable = []
+        if front_front:
+            all_movable = [front_front]
+        all_movable += [front]
         side_movable = []
         for obstacle in obstacles:
             if front == obstacle.coordinate:
@@ -27,4 +35,4 @@ class Farmer(Character):
         
         all_movable += side_movable
         
-        return [coord for coord in all_movable if 1 <= coord.y <= FIELD_SIZE and 0 <= coord.x <= FIELD_SIZE]
+        return [coord for coord in all_movable if 1 <= coord.y <= FIELD_SIZE and 1 <= coord.x <= FIELD_SIZE]

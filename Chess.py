@@ -7,7 +7,7 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 GREEN = (0, 140, 0)
 
-KING_ID = 69
+KING_ID = 16
 HIT_BOX_SIZE = 60
 
 
@@ -16,7 +16,7 @@ pygame.init()
 
 class Chess:
     
-    def __init__(self, group: Groups):
+    def __init__(self, group: Groups = Groups.SPECTATING):
         self.display = pygame.display.set_mode(WINDOWSIZE)
         pygame.display.set_caption('Chess')
         
@@ -24,10 +24,13 @@ class Chess:
         self.turn = 0
         self.parties = [Groups.WHITE, Groups.BLACK]
         self.is_dead = False
+        self.last_moves = []
+        self.score = 0
         self.reset()
         self.create_playing_field()
-        self.input_loop()
-    
+        if self.group != Groups.SPECTATING:
+            self.input_loop()
+
     def create_playing_field(self):
         self.display.fill(BLACK)
         
@@ -44,6 +47,7 @@ class Chess:
     def display_chess_pieces(self, king: King):
         all_subjects = [king] + king.subjects
         for subject in all_subjects:
+            if subject.dead: continue
             coord = self.coord_to_pixels(subject.coordinate)
             self.display.blit(pygame.image.load(subject.shape), coord)
     
@@ -54,11 +58,11 @@ class Chess:
                 if event == pygame.QUIT:
                     running = False
                     break
-
+                whose_turn = self.parties[self.turn % len(self.parties)]
                 if pygame.mouse.get_pressed()[0]: # Make this more efficient by maybe saving the hitbox with the subjects
-                    if self.group == Groups.BLACK:
+                    if whose_turn == Groups.BLACK:
                         tmp = self.get_what_clicked(pygame.mouse.get_pos(), self.black)
-                    elif self.group == Groups.WHITE:
+                    elif whose_turn == Groups.WHITE:
                         tmp = self.get_what_clicked(pygame.mouse.get_pos(), self.white)
 
                     if tmp:
@@ -68,8 +72,8 @@ class Chess:
                     if self.focus:
                         try:
                             new_cord = self.pixel_to_coord(pygame.mouse.get_pos())
-                            self.play_next_move(self.group, [self.focus, new_cord.x, new_cord.y])
-                            self.check_and_collide(self.id_into_character(self.group, self.focus))
+                            self.play_next_move(whose_turn, [self.focus, new_cord.x, new_cord.y])
+                            self.check_and_collide(self.id_into_character(whose_turn, self.focus))
                             self.create_playing_field()
                             self.turn += 1
                             self.focus = None
@@ -80,22 +84,23 @@ class Chess:
     def get_what_clicked(self, click_pos: tuple[int, int], king: King) -> int:
         all_subjects = king.subjects + [king]
         for subject in all_subjects:
+            if subject.dead: continue
             coords = self.coord_to_pixels(subject.coordinate)
             hitbox = pygame.Rect(coords[0], coords[1], HIT_BOX_SIZE, HIT_BOX_SIZE)
             if hitbox.collidepoint(click_pos):
                 return subject.id
 
-    def id_into_character(self, group: Groups, id: int):
+    def id_into_character(self, group: Groups, id: int) -> Character:
         if group == Groups.BLACK:
             search_for = self.black.subjects + [self.black]
         elif group == Groups.WHITE:
             search_for = self.white.subjects + [self.white]
-        
+
         for subject in search_for:
             if subject.id == id:
                 return subject
 
-    def check_and_collide(self, piece: Character) -> Character:
+    def check_and_collide(self, piece: Character) -> int:
         all_pieces = []
         if piece.ownership == Groups.BLACK:
             all_pieces = self.white.subjects + [self.white]
@@ -103,19 +108,26 @@ class Chess:
             all_pieces = self.black.subjects + [self.black]
 
         for subject in all_pieces:
-            if subject == piece: continue
+            if subject == piece or subject.dead: continue
             if subject.coordinate == piece.coordinate:
-                if subject.ownership == Groups.BLACK: # Handle the specific wins here
-                    try:
-                        self.black.subjects.remove(subject)
-                    except ValueError:
-                        self.game_over()
-                if subject.ownership == Groups.BLACK:
-                    try:
-                        self.black.subjects.remove(subject)
-                    except ValueError:
-                        self.game_over
-                return subject
+                try:
+                    if subject.ownership == Groups.BLACK: # Handle the specific wins here
+                        self.black.subjects[self.black.subjects.index(subject)].set_dead()
+                    if subject.ownership == Groups.WHITE:
+                        self.white.subjects[self.white.subjects.index(subject)].set_dead()
+                except ValueError:
+                    self.game_over()
+                    if subject.ownership == self.group:
+                        return -30
+                    else:
+                        return 50
+
+                if subject.ownership == self.group:
+                    return -10
+                else:
+                    self.score += 1
+                    return 10
+        return 0
 
     def game_over(self):
         self.is_dead = True
@@ -126,8 +138,10 @@ class Chess:
         #               [piece_id, x, y]
         relevant_obstacles = self.black.subjects + [self.black] + self.white.subjects + [self.white]
         subject = self.id_into_character(group, information[0])
-
+        if subject == None:
+            raise UnallowedCoordinateError('Not possible to move there!')
         if (subject.move(ChessCoordinate(information[1], information[2]), relevant_obstacles)):
+            self.last_moves += [group.value] + information
             return 5 # Adjust this reward later
         raise UnallowedCoordinateError('Not possible to move there!')
 
@@ -144,6 +158,20 @@ class Chess:
 
         self.black.set_standard_subjects()
         self.white.set_standard_subjects()
+    
+    
+    def get_all_subject_info(self, group: Groups) -> tuple[int, int, tuple[int, int]]:
+        if group == Groups.WHITE:
+            get_info_list = self.white.subjects + [self.white]
+        elif group == Groups.BLACK:
+            get_info_list = self.black.subjects + [self.black]
+
+        infos = []
+
+        for subject in get_info_list:
+            infos.append((group.value[0], subject.id, subject.coordinate.x, subject.coordinate.y))
+
+        return infos
 
 
 class UnallowedCoordinateError(Exception):
